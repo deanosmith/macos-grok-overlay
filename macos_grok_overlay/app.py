@@ -268,8 +268,48 @@ class AppDelegate(NSObject):
         url_string = str(self.webview.URL().absoluteString())
         self.auth_browser.set_main_webview_needs_auth(is_login_page_url(url_string))
 
+    # Move the overlay to the screen that currently contains the cursor.
+    @objc.python_method
+    def _move_window_to_cursor_screen(self):
+        mouse_loc = NSEvent.mouseLocation()
+
+        # Find the screen under the cursor.
+        cursor_screen = None
+        for screen in NSScreen.screens():
+            f = screen.frame()
+            if (f.origin.x <= mouse_loc.x < f.origin.x + f.size.width and
+                    f.origin.y <= mouse_loc.y < f.origin.y + f.size.height):
+                cursor_screen = screen
+                break
+
+        if cursor_screen is None:
+            cursor_screen = NSScreen.mainScreen()
+
+        current_screen = self.window.screen()
+        if current_screen is None:
+            return  # Window not yet placed; autosave handles initial position.
+
+        cur_f = current_screen.frame()
+        dst_f = cursor_screen.frame()
+
+        # Skip if already on the cursor's screen.
+        if cur_f.origin.x == dst_f.origin.x and cur_f.origin.y == dst_f.origin.y:
+            return
+
+        win_f = self.window.frame()
+        # Map relative position from current screen to destination screen.
+        rel_x = (win_f.origin.x - cur_f.origin.x) / cur_f.size.width
+        rel_y = (win_f.origin.y - cur_f.origin.y) / cur_f.size.height
+        new_x = dst_f.origin.x + rel_x * dst_f.size.width
+        new_y = dst_f.origin.y + rel_y * dst_f.size.height
+        # Clamp so the window stays fully within the destination screen.
+        new_x = max(dst_f.origin.x, min(new_x, dst_f.origin.x + dst_f.size.width - win_f.size.width))
+        new_y = max(dst_f.origin.y, min(new_y, dst_f.origin.y + dst_f.size.height - win_f.size.height))
+        self.window.setFrameOrigin_(NSMakePoint(new_x, new_y))
+
     # Logic to show the overlay, make it the key window, and focus on the typing area.
     def showWindow_(self, sender):
+        self._move_window_to_cursor_screen()
         self.window.makeKeyAndOrderFront_(None)
         NSApp.activateIgnoringOtherApps_(True)
         self.updateAuthSessionForMainWebView()

@@ -47,14 +47,24 @@ def install_startup():
     plist_path = launch_agents_dir / f"com.{username}.macos{APP_TITLE.lower()}overlay.plist"
     with open(plist_path, "wb") as f:
         plistlib.dump(plist, f)
-    result = os.system(f"launchctl load {plist_path}")
-    if result != 0:
-        print(f"Failed to load Launch Agent with exit code {result}")
+    uid = os.getuid()
+    label = plist["Label"]
+    # Use modern launchctl API (bootstrap/kickstart) instead of deprecated `load`.
+    bootstrap_result = subprocess.run(
+        ["launchctl", "bootstrap", f"gui/{uid}", str(plist_path)],
+        capture_output=True, text=True
+    )
+    if bootstrap_result.returncode != 0:
+        print(f"Failed to bootstrap Launch Agent: {bootstrap_result.stderr.strip()}")
         return False
-    else:
-        print(f"Installed as startup app. Launch Agent created at {plist_path}.")
-        print(f"To disable, run: macos-{APP_TITLE.lower()}-overlay --uninstall-startup")
-        return True
+    # Start it immediately (don't wait for next login).
+    subprocess.run(
+        ["launchctl", "kickstart", f"gui/{uid}/{label}"],
+        capture_output=True, text=True
+    )
+    print(f"Installed as startup app. Launch Agent created at {plist_path}.")
+    print(f"To disable, run: macos-{APP_TITLE.lower()}-overlay --uninstall-startup")
+    return True
 
 # Uninstall the app from running at login.
 def uninstall_startup():
@@ -62,11 +72,16 @@ def uninstall_startup():
     launch_agents_dir = Path.home() / "Library" / "LaunchAgents"
     plist_path = launch_agents_dir / f"com.{username}.macos{APP_TITLE.lower()}overlay.plist"
     if plist_path.exists():
+        uid = os.getuid()
+        label = f"com.{username}.macos{APP_TITLE.lower()}overlay"
         try:
-            os.system(f"launchctl unload {plist_path}")
+            subprocess.run(
+                ["launchctl", "bootout", f"gui/{uid}/{label}"],
+                capture_output=True, text=True
+            )
             print(f"Uninstalled Launch Agent.")
         except Exception as e:
-            print(f"Failed to uninstall launch agent. Encountered exception when running `launchctl unload {plist_path}`.\n{e}\n")
+            print(f"Failed to uninstall launch agent.\n{e}\n")
         print(f"Removed {plist_path}.")
         os.remove(plist_path)
         return True
