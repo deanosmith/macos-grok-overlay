@@ -25,7 +25,6 @@ from .health_checks import (
 
 
 # Main executable for running the application from the command line.
-@health_check_decorator
 def main():
     parser = argparse.ArgumentParser(description=f"macOS {APP_TITLE} Overlay App - Dedicated window that can be summoned and dismissed with the keyboard command Option+Space.")
     parser.add_argument(
@@ -46,11 +45,13 @@ def main():
     args = parser.parse_args()
 
     if args.install_startup:
-        install_startup()
+        if not install_startup():
+            sys.exit(1)
         return
 
     if args.uninstall_startup:
-        uninstall_startup()
+        if not uninstall_startup():
+            sys.exit(1)
         return
 
     if args.check_permissions:
@@ -58,6 +59,11 @@ def main():
         print("Permissions granted:", is_trusted)
         sys.exit(0 if is_trusted else PERMISSION_CHECK_EXIT)
 
+    _run_application()
+
+
+@health_check_decorator
+def _run_application():
     # Check permissions (make request to user) when launching, but proceed regardless.
     check_permissions()
     # # Ensure permissions before proceeding

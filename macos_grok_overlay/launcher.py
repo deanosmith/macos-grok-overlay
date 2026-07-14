@@ -40,15 +40,21 @@ def install_startup():
         "Label": f"com.{username}.macos{APP_TITLE.lower()}overlay",
         "ProgramArguments": program_args,
         "RunAtLoad": True,
-        "KeepAlive": True,  # Will be restarted automatically on failure.
+        "KeepAlive": {"SuccessfulExit": False},  # Will be restarted automatically on failure.
     }
     launch_agents_dir = Path.home() / "Library" / "LaunchAgents"
     launch_agents_dir.mkdir(parents=True, exist_ok=True)
     plist_path = launch_agents_dir / f"com.{username}.macos{APP_TITLE.lower()}overlay.plist"
-    with open(plist_path, "wb") as f:
-        plistlib.dump(plist, f)
     uid = os.getuid()
     label = plist["Label"]
+    # Replace an existing agent so this command can repair or update its configuration.
+    subprocess.run(
+        ["launchctl", "bootout", f"gui/{uid}/{label}"],
+        capture_output=True, text=True
+    )
+    with open(plist_path, "wb") as f:
+        plistlib.dump(plist, f)
+    reset_crash_counter()
     # Use modern launchctl API (bootstrap/kickstart) instead of deprecated `load`.
     bootstrap_result = subprocess.run(
         ["launchctl", "bootstrap", f"gui/{uid}", str(plist_path)],
@@ -58,10 +64,13 @@ def install_startup():
         print(f"Failed to bootstrap Launch Agent: {bootstrap_result.stderr.strip()}")
         return False
     # Start it immediately (don't wait for next login).
-    subprocess.run(
+    kickstart_result = subprocess.run(
         ["launchctl", "kickstart", f"gui/{uid}/{label}"],
         capture_output=True, text=True
     )
+    if kickstart_result.returncode != 0:
+        print(f"Failed to start Launch Agent: {kickstart_result.stderr.strip()}")
+        return False
     print(f"Installed as startup app. Launch Agent created at {plist_path}.")
     print(f"To disable, run: macos-{APP_TITLE.lower()}-overlay --uninstall-startup")
     return True

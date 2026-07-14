@@ -79,6 +79,9 @@ def check_crash_loop():
             CRASH_COUNTER_FILE,
             LOG_PATH
         ))
+        if os.environ.get("XPC_SERVICE_NAME"):
+            # A successful exit stops a Launch Agent configured to restart only on failure.
+            sys.exit(0)
         sys.exit(1)
 
 # Resets the crash counter after a successful run.

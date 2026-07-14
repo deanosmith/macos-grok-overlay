@@ -285,23 +285,48 @@ class AppDelegate(NSObject):
         if cursor_screen is None:
             cursor_screen = NSScreen.mainScreen()
 
-        current_screen = self.window.screen()
-        if current_screen is None:
-            return  # Window not yet placed; autosave handles initial position.
-
-        cur_f = current_screen.frame()
         dst_f = cursor_screen.frame()
+        win_f = self.window.frame()
 
+        # Find the screen that contains the largest portion of the saved window frame.
+        current_screen = None
+        largest_overlap = 0
+        for screen in NSScreen.screens():
+            screen_frame = screen.frame()
+            overlap_width = max(
+                0,
+                min(win_f.origin.x + win_f.size.width, screen_frame.origin.x + screen_frame.size.width)
+                - max(win_f.origin.x, screen_frame.origin.x),
+            )
+            overlap_height = max(
+                0,
+                min(win_f.origin.y + win_f.size.height, screen_frame.origin.y + screen_frame.size.height)
+                - max(win_f.origin.y, screen_frame.origin.y),
+            )
+            overlap = overlap_width * overlap_height
+            if overlap > largest_overlap:
+                largest_overlap = overlap
+                current_screen = screen
+
+            # Window not yet placed; autosave handles initial position.
+            # Hidden windows have no AppKit screen, so fall back to the cursor screen when necessary.
         # Skip if already on the cursor's screen.
-        if cur_f.origin.x == dst_f.origin.x and cur_f.origin.y == dst_f.origin.y:
+        if (current_screen is not None and
+                current_screen.frame().origin.x == dst_f.origin.x and
+                current_screen.frame().origin.y == dst_f.origin.y):
             return
 
-        win_f = self.window.frame()
-        # Map relative position from current screen to destination screen.
-        rel_x = (win_f.origin.x - cur_f.origin.x) / cur_f.size.width
-        rel_y = (win_f.origin.y - cur_f.origin.y) / cur_f.size.height
-        new_x = dst_f.origin.x + rel_x * dst_f.size.width
-        new_y = dst_f.origin.y + rel_y * dst_f.size.height
+        if current_screen is None:
+            # Window not yet placed or its saved display was disconnected; center it on the cursor screen.
+            new_x = dst_f.origin.x + (dst_f.size.width - win_f.size.width) / 2
+            new_y = dst_f.origin.y + (dst_f.size.height - win_f.size.height) / 2
+        else:
+            cur_f = current_screen.frame()
+            # Map relative position from current screen to destination screen.
+            rel_x = (win_f.origin.x - cur_f.origin.x) / cur_f.size.width
+            rel_y = (win_f.origin.y - cur_f.origin.y) / cur_f.size.height
+            new_x = dst_f.origin.x + rel_x * dst_f.size.width
+            new_y = dst_f.origin.y + rel_y * dst_f.size.height
         # Clamp so the window stays fully within the destination screen.
         new_x = max(dst_f.origin.x, min(new_x, dst_f.origin.x + dst_f.size.width - win_f.size.width))
         new_y = max(dst_f.origin.y, min(new_y, dst_f.origin.y + dst_f.size.height - win_f.size.height))
