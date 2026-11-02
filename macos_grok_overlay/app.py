@@ -5,6 +5,7 @@ import sys
 # Apple libraries
 import objc
 from AppKit import *
+from AppKit import NSWindowCollectionBehaviorMoveToActiveSpace
 from WebKit import *
 from Quartz import *
 from AVFoundation import AVCaptureDevice, AVMediaTypeAudio
@@ -31,7 +32,7 @@ from .constants import (
     LAUNCHER_TRIGGER,
 )
 from .launcher import (
-    install_startup,
+    install_startup_from_app,
     uninstall_startup,
 )
 from .listener import (
@@ -84,8 +85,7 @@ class AppDelegate(NSObject):
         )
         self.window.setLevel_(NSFloatingWindowLevel)
         self.window.setCollectionBehavior_(
-            NSWindowCollectionBehaviorCanJoinAllSpaces
-            | NSWindowCollectionBehaviorStationary
+            NSWindowCollectionBehaviorMoveToActiveSpace
         )
         # Save the last position and size
         self.window.setFrameAutosaveName_(FRAME_SAVE_NAME)
@@ -105,6 +105,7 @@ class AppDelegate(NSObject):
         self.webview.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)  # Resizes with window
         self.webview.setUIDelegate_(self.web_ui_delegate)
         self.webview.setNavigationDelegate_(self.web_nav_delegate)
+        self._webview_needs_reload = True
         # Set a custom user agent
         safari_user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         self.webview.setCustomUserAgent_(safari_user_agent)
@@ -122,6 +123,7 @@ class AppDelegate(NSObject):
         self.drag_area = DragArea.alloc().initWithFrame_(
             NSMakeRect(0, content_bounds.size.height - DRAG_AREA_HEIGHT, content_bounds.size.width, DRAG_AREA_HEIGHT)
         )
+        self.drag_area.setBackgroundColor_(NSColor.whiteColor())
         content_view.addSubview_(self.drag_area)
         # Add close button to the drag area
         close_button = NSButton.alloc().initWithFrame_(NSMakeRect(5, 5, 20, 20))
@@ -133,10 +135,6 @@ class AppDelegate(NSObject):
         # Update the webview sizinug and insert it below drag area.
         content_view.addSubview_(self.webview)
         self.webview.setFrame_(NSMakeRect(0, 0, content_bounds.size.width, content_bounds.size.height - DRAG_AREA_HEIGHT))
-        # Contat the target website.
-        url = NSURL.URLWithString_(WEBSITE)
-        request = NSURLRequest.requestWithURL_(url)
-        self.webview.loadRequest_(request)
         # Set up script message handler for background color changes
         configuration = self.webview.configuration()
         user_content_controller = configuration.userContentController()
@@ -144,15 +142,27 @@ class AppDelegate(NSObject):
         user_content_controller.addScriptMessageHandler_name_(self, "authRedirectHandler")
         # Inject JavaScript to monitor background color changes
         script = """
-            function _post(bg){try{const h=window.webkit?.messageHandlers?.backgroundColorHandler;h&&h.postMessage(bg);}catch(e){}}
-            function _getColor(el){if(!el) return null; const c=getComputedStyle(el).backgroundColor; return (!c||c==='rgba(0, 0, 0, 0)'||c==='transparent')?null:c;}
-            function sendBackgroundColor(){
-                const bg=_getColor(document.body)||_getColor(document.documentElement)||'rgb(255,255,255)';
-                _post(bg);
-            }
-            document.addEventListener('DOMContentLoaded', sendBackgroundColor);
-            window.addEventListener('load', sendBackgroundColor);
-            new MutationObserver(sendBackgroundColor).observe(document.documentElement,{attributes:true,attributeFilter:['style'],subtree:true,childList:true});
+            (function () {
+                let lastColor = null;
+                function getColor(element) {
+                    if (!element) return null;
+                    const color = getComputedStyle(element).backgroundColor;
+                    return (!color || color === 'rgba(0, 0, 0, 0)' || color === 'transparent') ? null : color;
+                }
+                function sendBackgroundColor() {
+                    const color = getColor(document.body) || getColor(document.documentElement) || 'rgb(255,255,255)';
+                    if (color === lastColor) return;
+                    window.webkit.messageHandlers.backgroundColorHandler.postMessage(color);
+                    lastColor = color;
+                }
+                const observer = new MutationObserver(sendBackgroundColor);
+                const options = {attributes: true, attributeFilter: ['class', 'style', 'data-theme']};
+                observer.observe(document.documentElement, options);
+                if (document.body) observer.observe(document.body, options);
+                window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', sendBackgroundColor);
+                window.addEventListener('load', sendBackgroundColor, {once: true});
+                sendBackgroundColor();
+            })();
         """
         user_script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(script, WKUserScriptInjectionTimeAtDocumentEnd, True)
         user_content_controller.addUserScript_(user_script)
@@ -259,13 +269,14 @@ class AppDelegate(NSObject):
         load_custom_launcher_trigger(self)
         # Set the delegate of the window to this parent application.
         self.window.setDelegate_(self)
-        # Make sure this window is shown and focused.
-        self.showWindow_(None)
+        # Keep the window hidden and defer loading the website until it is requested.
+        self.window.orderOut_(None)
 
     # Promote the app to a regular foreground app while sign-in pages are visible.
     @objc.python_method
     def updateAuthSessionForMainWebView(self):
-        url_string = str(self.webview.URL().absoluteString())
+        url = self.webview.URL()
+        url_string = str(url.absoluteString()) if url is not None else ""
         self.auth_browser.set_main_webview_needs_auth(is_login_page_url(url_string))
 
     # Move the overlay to the screen that currently contains the cursor.
@@ -337,22 +348,48 @@ class AppDelegate(NSObject):
         self._move_window_to_cursor_screen()
         self.window.makeKeyAndOrderFront_(None)
         NSApp.activateIgnoringOtherApps_(True)
+        if self._webview_needs_reload:
+            self.loadOverlayHomePage_(None)
         self.updateAuthSessionForMainWebView()
+        self.focusOverlayInput()
+
+    @objc.python_method
+    def focusOverlayInput(self):
         # Execute the JavaScript to focus the textarea in the WKWebView
-        self.webview.evaluateJavaScript_completionHandler_(
-            "[...document.querySelectorAll('textarea')].sort((a,b)=>a.contains(b)?-1:b.contains(a)?1:0).pop()?.focus();",
-            None
-        )
+        if self.window.isKeyWindow() and not self.webview.isLoading():
+            self.webview.evaluateJavaScript_completionHandler_(
+                "[...document.querySelectorAll('textarea')].sort((a,b)=>a.contains(b)?-1:b.contains(a)?1:0).pop()?.focus();",
+                None
+            )
+
+    def windowDidBecomeKey_(self, notification):
+        self.focusOverlayInput()
 
     # Hide the overlay and allow focus to return to the next visible application.
     def hideWindow_(self, sender):
+        self.window.orderOut_(None)
         NSApp.hide_(None)
+
+    def applicationDidHide_(self, notification):
+        self.window.orderOut_(None)
+        if not self._webview_needs_reload:
+            self._webview_needs_reload = True
+            self.webview.stopLoading()
+            self.webview.loadRequest_(
+                NSURLRequest.requestWithURL_(NSURL.URLWithString_("about:blank"))
+            )
     
     # Go to the default landing website for the overlay (in case accidentally navigated away).
     def goToWebsite_(self, sender):
         self.loadOverlayHomePage_(None)
+        self.showWindow_(None)
 
     def loadOverlayHomePage_(self, sender):
+        # Contact the target website only while visible; otherwise defer until shown.
+        self._webview_needs_reload = True
+        if not self.window.isVisible():
+            return
+        self._webview_needs_reload = False
         url = NSURL.URLWithString_(WEBSITE)
         request = NSURLRequest.requestWithURL_(url)
         self.webview.loadRequest_(request)
@@ -417,7 +454,7 @@ class AppDelegate(NSObject):
 
     # Go to the default landing website for the overlay (in case accidentally navigated away).
     def install_(self, sender):
-        if install_startup():
+        if install_startup_from_app():
             # Exit the current process since a new one will launch.
             print("Installation successful, exiting.", flush=True)
             NSApp.terminate_(None)
@@ -427,7 +464,7 @@ class AppDelegate(NSObject):
     # Go to the default landing website for the overlay (in case accidentally navigated away).
     def uninstall_(self, sender):
         if uninstall_startup():
-            NSApp.hide_(None)
+            self.hideWindow_(None)
 
     # Handle the 'Set Trigger' menu item click.
     def setTrigger_(self, sender):

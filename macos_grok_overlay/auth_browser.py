@@ -341,6 +341,9 @@ class WebNavigationDelegate(NSObject):
         request = navigation_action.request()
         url_string = str(request.URL().absoluteString())
 
+        if not self.app_delegate.window.isVisible() and url_string != "about:blank":
+            return WKNavigationActionPolicyCancel
+
         if not is_external_auth_url(url_string):
             return WKNavigationActionPolicyAllow
 
@@ -365,8 +368,9 @@ class WebNavigationDelegate(NSObject):
         )
 
     def webView_didFinishNavigation_(self, webview, navigation):
-        if webview == self.app_delegate.webview:
+        if webview == self.app_delegate.webview and self.app_delegate.window.isVisible():
             self.app_delegate.updateAuthSessionForMainWebView()
+            self.app_delegate.focusOverlayInput()
 
 
 class WebUIDelegate(NSObject):

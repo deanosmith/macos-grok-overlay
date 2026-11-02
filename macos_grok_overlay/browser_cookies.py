@@ -48,8 +48,10 @@ def _ns_cookie_from_jar_cookie(cookie):
         NSHTTPCookieValue: cookie.value,
         NSHTTPCookieDomain: cookie.domain,
         NSHTTPCookiePath: cookie.path or "/",
-        NSHTTPCookieSecure: bool(cookie.secure),
     }
+    # Any value for this key, including False, enables Secure.
+    if cookie.secure:
+        properties[NSHTTPCookieSecure] = "TRUE"
     if cookie.expires and cookie.expires > 0:
         properties[NSHTTPCookieExpires] = NSDate.dateWithTimeIntervalSince1970_(
             float(cookie.expires)

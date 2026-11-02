@@ -13,7 +13,7 @@ from ApplicationServices import AXIsProcessTrustedWithOptions, kAXTrustedCheckOp
 
 # Local libraries
 from .constants import APP_TITLE
-from .health_checks import reset_crash_counter
+from .health_checks import LOG_PATH, reset_crash_counter
 
 
 # Get the executable path.
@@ -73,6 +73,24 @@ def install_startup():
         return False
     print(f"Installed as startup app. Launch Agent created at {plist_path}.")
     print(f"To disable, run: macos-{APP_TITLE.lower()}-overlay --uninstall-startup")
+    return True
+
+def install_startup_from_app():
+    # bootout terminates the app's job, so the installer needs a separate process group.
+    try:
+        with open(LOG_PATH, "a") as log_file:
+            result = subprocess.run(
+                get_executable() + ["--install-startup"],
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+    except OSError as error:
+        print(f"Failed to start startup installer: {error}", flush=True)
+        return False
+    if result.returncode != 0:
+        print(f"Startup installer failed with exit code {result.returncode}. See {LOG_PATH}.", flush=True)
+        return False
     return True
 
 # Uninstall the app from running at login.
@@ -140,4 +158,3 @@ def ensure_accessibility_permissions():
     else:
         print("Permissions not granted within the time limit. Uninstalling application, since this installation must have failed.")
         uninstall_startup()
-
