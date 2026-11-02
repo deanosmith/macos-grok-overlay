@@ -15,6 +15,7 @@ class LoadingRecoveryTests(unittest.TestCase):
         self.webview.isLoading.return_value = False
         self.webview.URL.return_value = NSURL.URLWithString_("https://grok.com/")
         self.app.window.isVisible.return_value = True
+        self.app._webview_needs_reload = False
         self.delegate = auth_browser.WebNavigationDelegate.alloc().initWithAppDelegate_(self.app)
         self.error = NSError.errorWithDomain_code_userInfo_(NSURLErrorDomain, -1100, None)
         self.output = io.StringIO()
@@ -51,6 +52,7 @@ class LoadingRecoveryTests(unittest.TestCase):
                 self.fail_provisionally()
 
         self.app.loading_view.setHidden_.assert_not_called()
+        self.assertEqual(self.app.window_manifestation.finish.call_count, 2)
         self.assertEqual(self.alert.runModal.call_count, 2)
 
     def test_cancellation_restores_existing_page_without_alert(self):
@@ -67,14 +69,33 @@ class LoadingRecoveryTests(unittest.TestCase):
         self.fail_provisionally()
 
         self.app.loading_view.setHidden_.assert_not_called()
+        self.app.window_manifestation.finish.assert_not_called()
         self.alert.runModal.assert_not_called()
 
     def test_hidden_failure_does_not_uncover_blank_or_show_alert(self):
         self.app.window.isVisible.return_value = False
+        self.app._webview_needs_reload = True
         self.fail_provisionally()
 
         self.app.loading_view.setHidden_.assert_not_called()
         self.alert.runModal.assert_not_called()
+
+    def test_hidden_preserved_page_recovers_without_activating_app(self):
+        self.app.window.isVisible.return_value = False
+        self.fail_provisionally()
+
+        self.app.loading_view.setHidden_.assert_called_once_with(True)
+        self.app.updateAuthSessionForMainWebView.assert_not_called()
+        self.app.focusOverlayInput.assert_not_called()
+        self.alert.runModal.assert_not_called()
+
+    def test_preserved_page_can_finish_loading_while_hidden(self):
+        self.app.window.isVisible.return_value = False
+        self.delegate.webView_didFinishNavigation_(self.webview, None)
+
+        self.app.loading_view.setHidden_.assert_called_once_with(True)
+        self.app.updateAuthSessionForMainWebView.assert_not_called()
+        self.app.focusOverlayInput.assert_not_called()
 
     def test_other_webview_failure_is_ignored(self):
         self.delegate.webView_didFailProvisionalNavigation_withError_(Mock(), None, self.error)

@@ -341,7 +341,9 @@ class WebNavigationDelegate(NSObject):
         request = navigation_action.request()
         url_string = str(request.URL().absoluteString())
 
-        if not self.app_delegate.window.isVisible() and url_string != "about:blank":
+        if (not self.app_delegate.window.isVisible()
+                and self.app_delegate._webview_needs_reload
+                and url_string != "about:blank"):
             return WKNavigationActionPolicyCancel
 
         if not is_external_auth_url(url_string):
@@ -368,11 +370,13 @@ class WebNavigationDelegate(NSObject):
         )
 
     def webView_didFinishNavigation_(self, webview, navigation):
-        if webview == self.app_delegate.webview and self.app_delegate.window.isVisible():
-            if webview.URL().absoluteString() != "about:blank":
+        if webview == self.app_delegate.webview:
+            if (not self.app_delegate._webview_needs_reload
+                    and webview.URL().absoluteString() != "about:blank"):
                 self.app_delegate.loading_view.setHidden_(True)
-            self.app_delegate.updateAuthSessionForMainWebView()
-            self.app_delegate.focusOverlayInput()
+            if self.app_delegate.window.isVisible():
+                self.app_delegate.updateAuthSessionForMainWebView()
+                self.app_delegate.focusOverlayInput()
 
     def webView_didFailProvisionalNavigation_withError_(self, webview, navigation, error):
         self._handle_navigation_failure(webview, error)
@@ -384,16 +388,22 @@ class WebNavigationDelegate(NSObject):
     def _handle_navigation_failure(self, webview, error):
         if webview != self.app_delegate.webview or webview.isLoading():
             return
+        self.app_delegate.window_manifestation.finish()
+        url = webview.URL()
+        has_page = (not self.app_delegate._webview_needs_reload
+                    and url is not None and url.absoluteString() != "about:blank")
+        if has_page:
+            self.app_delegate.loading_view.setHidden_(True)
+        cancelled = error.domain() == NSURLErrorDomain and error.code() == NSURLErrorCancelled
+        if not cancelled:
+            print(f"Failed to load Grok: {error.localizedDescription()}", flush=True)
         if not self.app_delegate.window.isVisible():
             return
-        url = webview.URL()
-        if url is not None and url.absoluteString() != "about:blank":
-            self.app_delegate.loading_view.setHidden_(True)
+        if has_page:
             self.app_delegate.updateAuthSessionForMainWebView()
             self.app_delegate.focusOverlayInput()
-        if error.domain() == NSURLErrorDomain and error.code() == NSURLErrorCancelled:
+        if cancelled:
             return
-        print(f"Failed to load Grok: {error.localizedDescription()}", flush=True)
         alert = NSAlert.alloc().init()
         alert.setAlertStyle_(NSAlertStyleInformational)
         alert.setMessageText_("Unable to load Grok")

@@ -40,6 +40,8 @@ from .listener import (
     load_custom_launcher_trigger,
     set_custom_launcher_trigger,
 )
+from .loading_view import LoadingView
+from .window_manifestation import WindowManifestation
 
 
 # Custom window (contains entire application).
@@ -136,11 +138,9 @@ class AppDelegate(NSObject):
         content_view.addSubview_(self.webview)
         self.webview.setFrame_(NSMakeRect(0, 0, content_bounds.size.width, content_bounds.size.height - DRAG_AREA_HEIGHT))
         # Cover WebKit's white empty page until the requested page finishes loading.
-        self.loading_view = NSView.alloc().initWithFrame_(self.webview.frame())
-        self.loading_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
-        self.loading_view.setWantsLayer_(True)
-        self.loading_view.layer().setBackgroundColor_(NSColor.blackColor().CGColor())
+        self.loading_view = LoadingView.alloc().initWithFrame_(self.webview.frame())
         content_view.addSubview_(self.loading_view)
+        self.window_manifestation = WindowManifestation.alloc().initWithWindow_(self.window)
         # Set up script message handler for background color changes
         configuration = self.webview.configuration()
         user_content_controller = configuration.userContentController()
@@ -352,6 +352,8 @@ class AppDelegate(NSObject):
     # Logic to show the overlay, make it the key window, and focus on the typing area.
     def showWindow_(self, sender):
         self._move_window_to_cursor_screen()
+        if self._webview_needs_reload and not self.window.isVisible():
+            self.window_manifestation.begin()
         self.window.makeKeyAndOrderFront_(None)
         NSApp.activateIgnoringOtherApps_(True)
         if self._webview_needs_reload:
@@ -373,11 +375,16 @@ class AppDelegate(NSObject):
 
     # Hide the overlay and allow focus to return to the next visible application.
     def hideWindow_(self, sender):
+        self.window_manifestation.finish()
         self.window.orderOut_(None)
         NSApp.hide_(None)
 
     def applicationDidHide_(self, notification):
+        self.window_manifestation.finish()
         self.window.orderOut_(None)
+        url = self.webview.URL()
+        if url is not None and url.host() == "grok.com" and url.path().startswith("/c/"):
+            return
         if not self._webview_needs_reload:
             self.loading_view.setHidden_(False)
             self.drag_area.setBackgroundColor_(NSColor.blackColor())
@@ -534,6 +541,7 @@ class AppDelegate(NSObject):
 
     # Handler for when the window resizes (adjusts the drag area).
     def windowDidResize_(self, notification):
+        self.window_manifestation.finish()
         bounds = self.window.contentView().bounds()
         w, h = bounds.size.width, bounds.size.height
         self.drag_area.setFrame_(NSMakeRect(0, h - DRAG_AREA_HEIGHT, w, DRAG_AREA_HEIGHT))
