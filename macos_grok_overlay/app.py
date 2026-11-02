@@ -9,7 +9,7 @@ from AppKit import NSWindowCollectionBehaviorMoveToActiveSpace
 from WebKit import *
 from Quartz import *
 from AVFoundation import AVCaptureDevice, AVMediaTypeAudio
-from Foundation import NSObject, NSURL, NSURLRequest, NSDate
+from Foundation import NSObject, NSURL, NSURLRequest, NSDate, NSUserDefaults
 
 # Local libraries
 from .auth_browser import (
@@ -75,6 +75,8 @@ class DragArea(NSView):
 class AppDelegate(NSObject):
     # The main application setup.
     def applicationDidFinishLaunching_(self, notification):
+        self.settings = NSUserDefaults.alloc().initWithSuiteName_("com.macos-grok-overlay")
+        self.settings.registerDefaults_({"ParticleAnimationsEnabled": True})
         # Run as accessory app
         NSApp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
         # Create a borderless, floating, resizable window
@@ -238,6 +240,19 @@ class AppDelegate(NSObject):
         self.trigger_item.setEnabled_(False)
         menu.addItem_(self.trigger_item)
         menu.addItem_(NSMenuItem.separatorItem())
+        settings_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Settings", "", "")
+        settings_menu = NSMenu.alloc().initWithTitle_("Settings")
+        particles_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Particle Animations", "toggleParticleAnimations:", ""
+        )
+        particles_item.setTarget_(self)
+        particles_item.setState_(
+            NSControlStateValueOn if self.settings.boolForKey_("ParticleAnimationsEnabled") else NSControlStateValueOff
+        )
+        settings_menu.addItem_(particles_item)
+        settings_item.setSubmenu_(settings_menu)
+        menu.addItem_(settings_item)
+        menu.addItem_(NSMenuItem.separatorItem())
         # ----------------------------------------
         # Quit.
         quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Quit", "terminate:", "q")
@@ -352,7 +367,8 @@ class AppDelegate(NSObject):
     # Logic to show the overlay, make it the key window, and focus on the typing area.
     def showWindow_(self, sender):
         self._move_window_to_cursor_screen()
-        if self._webview_needs_reload and not self.window.isVisible():
+        if (self._webview_needs_reload and not self.window.isVisible()
+                and self.settings.boolForKey_("ParticleAnimationsEnabled")):
             self.window_manifestation.begin()
         self.window.makeKeyAndOrderFront_(None)
         NSApp.activateIgnoringOtherApps_(True)
@@ -486,6 +502,13 @@ class AppDelegate(NSObject):
     # Handle the 'Set Trigger' menu item click.
     def setTrigger_(self, sender):
         set_custom_launcher_trigger(self)
+
+    def toggleParticleAnimations_(self, sender):
+        enabled = not self.settings.boolForKey_("ParticleAnimationsEnabled")
+        self.settings.setBool_forKey_(enabled, "ParticleAnimationsEnabled")
+        sender.setState_(NSControlStateValueOn if enabled else NSControlStateValueOff)
+        if not enabled:
+            self.window_manifestation.finish()
 
     def updateTriggerMenu(self, key_string=""):
         self.trigger_item.setTitle_("    " + key_string)
