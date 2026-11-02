@@ -116,14 +116,14 @@ class AppDelegate(NSObject):
         content_view = NSView.alloc().initWithFrame_(self.window.contentView().bounds())
         content_view.setWantsLayer_(True)
         content_view.layer().setCornerRadius_(CORNER_RADIUS)
-        content_view.layer().setBackgroundColor_(NSColor.whiteColor().CGColor())
+        content_view.layer().setBackgroundColor_(NSColor.blackColor().CGColor())
         self.window.setContentView_(content_view)
         # Set up drag area (top sliver, full width)
         content_bounds = content_view.bounds()
         self.drag_area = DragArea.alloc().initWithFrame_(
             NSMakeRect(0, content_bounds.size.height - DRAG_AREA_HEIGHT, content_bounds.size.width, DRAG_AREA_HEIGHT)
         )
-        self.drag_area.setBackgroundColor_(NSColor.whiteColor())
+        self.drag_area.setBackgroundColor_(NSColor.blackColor())
         content_view.addSubview_(self.drag_area)
         # Add close button to the drag area
         close_button = NSButton.alloc().initWithFrame_(NSMakeRect(5, 5, 20, 20))
@@ -135,6 +135,12 @@ class AppDelegate(NSObject):
         # Update the webview sizinug and insert it below drag area.
         content_view.addSubview_(self.webview)
         self.webview.setFrame_(NSMakeRect(0, 0, content_bounds.size.width, content_bounds.size.height - DRAG_AREA_HEIGHT))
+        # Cover WebKit's white empty page until the requested page finishes loading.
+        self.loading_view = NSView.alloc().initWithFrame_(self.webview.frame())
+        self.loading_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+        self.loading_view.setWantsLayer_(True)
+        self.loading_view.layer().setBackgroundColor_(NSColor.blackColor().CGColor())
+        content_view.addSubview_(self.loading_view)
         # Set up script message handler for background color changes
         configuration = self.webview.configuration()
         user_content_controller = configuration.userContentController()
@@ -150,7 +156,7 @@ class AppDelegate(NSObject):
                     return (!color || color === 'rgba(0, 0, 0, 0)' || color === 'transparent') ? null : color;
                 }
                 function sendBackgroundColor() {
-                    const color = getColor(document.body) || getColor(document.documentElement) || 'rgb(255,255,255)';
+                    const color = getColor(document.body) || getColor(document.documentElement) || 'rgb(0,0,0)';
                     if (color === lastColor) return;
                     window.webkit.messageHandlers.backgroundColorHandler.postMessage(color);
                     lastColor = color;
@@ -373,6 +379,8 @@ class AppDelegate(NSObject):
     def applicationDidHide_(self, notification):
         self.window.orderOut_(None)
         if not self._webview_needs_reload:
+            self.loading_view.setHidden_(False)
+            self.drag_area.setBackgroundColor_(NSColor.blackColor())
             self._webview_needs_reload = True
             self.webview.stopLoading()
             self.webview.loadRequest_(
@@ -389,6 +397,8 @@ class AppDelegate(NSObject):
         self._webview_needs_reload = True
         if not self.window.isVisible():
             return
+        self.loading_view.setHidden_(False)
+        self.drag_area.setBackgroundColor_(NSColor.blackColor())
         self._webview_needs_reload = False
         url = NSURL.URLWithString_(WEBSITE)
         request = NSURLRequest.requestWithURL_(url)

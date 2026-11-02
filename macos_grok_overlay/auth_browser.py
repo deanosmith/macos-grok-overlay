@@ -20,7 +20,7 @@ from AppKit import (
     NSWorkspace,
     NSWorkspaceOpenConfiguration,
 )
-from Foundation import NSObject, NSURL
+from Foundation import NSObject, NSURLErrorCancelled, NSURLErrorDomain, NSURL
 from WebKit import (
     WKNavigationActionPolicyAllow,
     WKNavigationActionPolicyCancel,
@@ -369,8 +369,39 @@ class WebNavigationDelegate(NSObject):
 
     def webView_didFinishNavigation_(self, webview, navigation):
         if webview == self.app_delegate.webview and self.app_delegate.window.isVisible():
+            if webview.URL().absoluteString() != "about:blank":
+                self.app_delegate.loading_view.setHidden_(True)
             self.app_delegate.updateAuthSessionForMainWebView()
             self.app_delegate.focusOverlayInput()
+
+    def webView_didFailProvisionalNavigation_withError_(self, webview, navigation, error):
+        self._handle_navigation_failure(webview, error)
+
+    def webView_didFailNavigation_withError_(self, webview, navigation, error):
+        self._handle_navigation_failure(webview, error)
+
+    @objc.python_method
+    def _handle_navigation_failure(self, webview, error):
+        if webview != self.app_delegate.webview or webview.isLoading():
+            return
+        if not self.app_delegate.window.isVisible():
+            return
+        url = webview.URL()
+        if url is not None and url.absoluteString() != "about:blank":
+            self.app_delegate.loading_view.setHidden_(True)
+            self.app_delegate.updateAuthSessionForMainWebView()
+            self.app_delegate.focusOverlayInput()
+        if error.domain() == NSURLErrorDomain and error.code() == NSURLErrorCancelled:
+            return
+        print(f"Failed to load Grok: {error.localizedDescription()}", flush=True)
+        alert = NSAlert.alloc().init()
+        alert.setAlertStyle_(NSAlertStyleInformational)
+        alert.setMessageText_("Unable to load Grok")
+        alert.setInformativeText_(
+            f"{error.localizedDescription()}\n\n"
+            "Choose Home from the menu-bar menu to try again."
+        )
+        alert.runModal()
 
 
 class WebUIDelegate(NSObject):
