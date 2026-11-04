@@ -9,10 +9,6 @@ from .constants import (
     LAUNCHER_TRIGGER_MASK,
     PERMISSION_CHECK_EXIT,
 )
-from .app import (
-    AppDelegate,
-    NSApplication
-)
 from .launcher import (
     check_permissions,
     ensure_accessibility_permissions,
@@ -64,6 +60,8 @@ def main():
 
 @health_check_decorator
 def _run_application():
+    from .app import AppDelegate, NSApplication
+
     # Check permissions (make request to user) when launching, but proceed regardless.
     check_permissions()
     # # Ensure permissions before proceeding

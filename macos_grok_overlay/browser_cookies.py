@@ -3,7 +3,10 @@
 # Chrome and the overlay use separate cookie stores. Reading Chrome cookies and
 # injecting them is required to sync a browser login into the overlay.
 
+from threading import Thread
+
 import browser_cookie3
+import objc
 from Foundation import (
     NSDate,
     NSHTTPCookie,
@@ -13,6 +16,7 @@ from Foundation import (
     NSHTTPCookiePath,
     NSHTTPCookieSecure,
     NSHTTPCookieValue,
+    NSOperationQueue,
 )
 
 SYNC_DOMAIN_MARKERS = (
@@ -59,9 +63,7 @@ def _ns_cookie_from_jar_cookie(cookie):
     return NSHTTPCookie.cookieWithProperties_(properties)
 
 
-def sync_browser_cookies_to_webview(webview, completion_handler=None):
-    """Copy Grok-related cookies from Chrome into the overlay webview."""
-    cookies = _collect_cookies()
+def _import_cookies_into_webview(webview, cookies, completion_handler):
     if not cookies:
         print("No Grok session cookies found in Chrome.", flush=True)
         if completion_handler is not None:
@@ -89,3 +91,15 @@ def sync_browser_cookies_to_webview(webview, completion_handler=None):
         store.setCookie_completionHandler_(ns_cookies[index], after_set)
 
     set_at_index(0, 0)
+
+
+def sync_browser_cookies_to_webview(webview, completion_handler=None):
+    """Copy Grok-related cookies from Chrome without blocking the UI thread."""
+    def collect_in_background():
+        cookies = _collect_cookies()
+        with objc.autorelease_pool():
+            NSOperationQueue.mainQueue().addOperationWithBlock_(
+                lambda: _import_cookies_into_webview(webview, cookies, completion_handler)
+            )
+
+    Thread(target=collect_in_background, daemon=True).start()

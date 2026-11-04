@@ -341,11 +341,6 @@ class WebNavigationDelegate(NSObject):
         request = navigation_action.request()
         url_string = str(request.URL().absoluteString())
 
-        if (not self.app_delegate.window.isVisible()
-                and self.app_delegate._webview_needs_reload
-                and url_string != "about:blank"):
-            return WKNavigationActionPolicyCancel
-
         if not is_external_auth_url(url_string):
             return WKNavigationActionPolicyAllow
 
@@ -394,6 +389,8 @@ class WebNavigationDelegate(NSObject):
                     and url is not None and url.absoluteString() != "about:blank")
         if has_page:
             self.app_delegate.loading_view.setHidden_(True)
+        else:
+            self.app_delegate._webview_needs_reload = True
         cancelled = error.domain() == NSURLErrorDomain and error.code() == NSURLErrorCancelled
         if not cancelled:
             print(f"Failed to load Grok: {error.localizedDescription()}", flush=True)

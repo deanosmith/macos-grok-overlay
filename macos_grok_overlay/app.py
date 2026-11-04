@@ -243,7 +243,7 @@ class AppDelegate(NSObject):
         settings_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Settings", "", "")
         settings_menu = NSMenu.alloc().initWithTitle_("Settings")
         particles_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Particle Animations", "toggleParticleAnimations:", ""
+            "Window Animations", "toggleParticleAnimations:", ""
         )
         particles_item.setTarget_(self)
         particles_item.setState_(
@@ -290,8 +290,9 @@ class AppDelegate(NSObject):
         load_custom_launcher_trigger(self)
         # Set the delegate of the window to this parent application.
         self.window.setDelegate_(self)
-        # Keep the window hidden and defer loading the website until it is requested.
+        # Keep the window hidden while loading the website immediately.
         self.window.orderOut_(None)
+        self.loadOverlayHomePage_(None)
 
     # Promote the app to a regular foreground app while sign-in pages are visible.
     @objc.python_method
@@ -367,7 +368,7 @@ class AppDelegate(NSObject):
     # Logic to show the overlay, make it the key window, and focus on the typing area.
     def showWindow_(self, sender):
         self._move_window_to_cursor_screen()
-        if (self._webview_needs_reload and not self.window.isVisible()
+        if (not self.window.isVisible()
                 and self.settings.boolForKey_("ParticleAnimationsEnabled")):
             self.window_manifestation.begin()
         self.window.makeKeyAndOrderFront_(None)
@@ -398,17 +399,6 @@ class AppDelegate(NSObject):
     def applicationDidHide_(self, notification):
         self.window_manifestation.finish()
         self.window.orderOut_(None)
-        url = self.webview.URL()
-        if url is not None and url.host() == "grok.com" and url.path().startswith("/c/"):
-            return
-        if not self._webview_needs_reload:
-            self.loading_view.setHidden_(False)
-            self.drag_area.setBackgroundColor_(NSColor.blackColor())
-            self._webview_needs_reload = True
-            self.webview.stopLoading()
-            self.webview.loadRequest_(
-                NSURLRequest.requestWithURL_(NSURL.URLWithString_("about:blank"))
-            )
     
     # Go to the default landing website for the overlay (in case accidentally navigated away).
     def goToWebsite_(self, sender):
@@ -416,10 +406,7 @@ class AppDelegate(NSObject):
         self.showWindow_(None)
 
     def loadOverlayHomePage_(self, sender):
-        # Contact the target website only while visible; otherwise defer until shown.
-        self._webview_needs_reload = True
-        if not self.window.isVisible():
-            return
+        # Load the target website even while hidden so the overlay is ready when shown.
         self.loading_view.setHidden_(False)
         self.drag_area.setBackgroundColor_(NSColor.blackColor())
         self._webview_needs_reload = False

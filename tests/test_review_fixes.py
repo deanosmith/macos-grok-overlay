@@ -10,9 +10,102 @@ import unittest
 from contextlib import ExitStack, redirect_stdout
 from http.cookiejar import Cookie
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from macos_grok_overlay import app, browser_cookies, launcher
+from macos_grok_overlay import app, browser_cookies, launcher, listener
+
+
+class CommandLineImportTests(unittest.TestCase):
+    def test_package_import_does_not_load_overlay_ui(self):
+        result = subprocess.run(
+            [sys.executable, "-c", "import sys, macos_grok_overlay; print('macos_grok_overlay.app' in sys.modules)"],
+            capture_output=True, text=True, check=True,
+        )
+
+        self.assertEqual(result.stdout.strip(), "False")
+
+
+class KeyboardListenerTests(unittest.TestCase):
+    def setUp(self):
+        self.app = Mock()
+        self.event = object()
+        self.contexts = ExitStack()
+        self.addCleanup(self.contexts.close)
+        self.contexts.enter_context(patch.dict(
+            listener.LAUNCHER_TRIGGER,
+            {"flags": listener.NSEventModifierFlagOption, "key": 49},
+            clear=True,
+        ))
+        self.contexts.enter_context(patch.object(listener, "handle_new_trigger", None))
+        self.flags = self.contexts.enter_context(patch.object(listener, "CGEventGetFlags", return_value=0))
+        self.keycode = self.contexts.enter_context(patch.object(listener, "CGEventGetIntegerValueField", return_value=49))
+        self.contexts.enter_context(redirect_stdout(io.StringIO()))
+        self.callback = listener.global_show_hide_listener(self.app)
+
+    def test_unrelated_modifiers_skip_keycode_lookup(self):
+        result = self.callback(None, listener.kCGEventKeyDown, self.event, None)
+
+        self.assertIs(result, self.event)
+        self.keycode.assert_not_called()
+        self.app.showWindow_.assert_not_called()
+        self.app.hideWindow_.assert_not_called()
+
+    def test_matching_shortcut_still_toggles_window(self):
+        self.flags.return_value = listener.LAUNCHER_TRIGGER["flags"]
+        for is_key in (False, True):
+            with self.subTest(is_key=is_key):
+                self.app.reset_mock()
+                self.app.window.isKeyWindow.return_value = is_key
+                result = self.callback(None, listener.kCGEventKeyDown, self.event, None)
+
+                self.assertIsNone(result)
+                if is_key:
+                    self.app.hideWindow_.assert_called_once_with(None)
+                    self.app.showWindow_.assert_not_called()
+                else:
+                    self.app.showWindow_.assert_called_once_with(None)
+                    self.app.hideWindow_.assert_not_called()
+
+    def test_trigger_capture_still_receives_unmodified_keys(self):
+        listener.LAUNCHER_TRIGGER.update({"flags": None, "key": None})
+        with patch.object(listener, "handle_new_trigger") as capture:
+            result = self.callback(None, listener.kCGEventKeyDown, self.event, None)
+
+        self.assertIsNone(result)
+        capture.assert_called_once_with(self.event, 0, 49)
+
+
+class BrowserCookieSyncTests(unittest.TestCase):
+    def test_collection_uses_worker_and_import_returns_to_main_queue(self):
+        webview = Mock()
+        completion = Mock()
+        cookies = [object()]
+        with ExitStack() as contexts:
+            thread = contexts.enter_context(patch.object(browser_cookies, "Thread"))
+            collect = contexts.enter_context(patch.object(browser_cookies, "_collect_cookies", return_value=cookies))
+            operation_queue = contexts.enter_context(patch.object(browser_cookies, "NSOperationQueue"))
+            import_cookies = contexts.enter_context(patch.object(browser_cookies, "_import_cookies_into_webview"))
+            browser_cookies.sync_browser_cookies_to_webview(webview, completion)
+
+            thread.return_value.start.assert_called_once_with()
+            self.assertTrue(thread.call_args.kwargs["daemon"])
+            collect.assert_not_called()
+            thread.call_args.kwargs["target"]()
+            collect.assert_called_once_with()
+            import_cookies.assert_not_called()
+            main_queue = operation_queue.mainQueue.return_value
+            main_queue.addOperationWithBlock_.assert_called_once()
+            main_queue.addOperationWithBlock_.call_args.args[0]()
+            import_cookies.assert_called_once_with(webview, cookies, completion)
+
+    def test_empty_cookie_import_completes_without_touching_webview(self):
+        webview = Mock()
+        completion = Mock()
+        with redirect_stdout(io.StringIO()):
+            browser_cookies._import_cookies_into_webview(webview, [], completion)
+
+        completion.assert_called_once_with(0)
+        webview.configuration.assert_not_called()
 
 
 class StartupInstallationTests(unittest.TestCase):

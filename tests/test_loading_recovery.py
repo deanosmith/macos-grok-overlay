@@ -72,13 +72,14 @@ class LoadingRecoveryTests(unittest.TestCase):
         self.app.window_manifestation.finish.assert_not_called()
         self.alert.runModal.assert_not_called()
 
-    def test_hidden_failure_does_not_uncover_blank_or_show_alert(self):
+    def test_hidden_first_load_failure_remains_retryable_without_alert(self):
         self.app.window.isVisible.return_value = False
-        self.app._webview_needs_reload = True
+        self.webview.URL.return_value = None
         self.fail_provisionally()
 
         self.app.loading_view.setHidden_.assert_not_called()
         self.alert.runModal.assert_not_called()
+        self.assertTrue(self.app._webview_needs_reload)
 
     def test_hidden_preserved_page_recovers_without_activating_app(self):
         self.app.window.isVisible.return_value = False

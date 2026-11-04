@@ -204,9 +204,11 @@ def get_trigger_string(event, flags, keycode):
 def global_show_hide_listener(app):
     def listener(proxy, event_type, event, refcon):
         if event_type == kCGEventKeyDown:
-            keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
             flags = CGEventGetFlags(event) & LAUNCHER_TRIGGER_MASK
-            if (None in set(LAUNCHER_TRIGGER.values())) and handle_new_trigger:
+            if not handle_new_trigger and flags != LAUNCHER_TRIGGER["flags"]:
+                return event
+            keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
+            if handle_new_trigger and None in LAUNCHER_TRIGGER.values():
                 print("  received keys, establishing new trigger..", flush=True)
                 handle_new_trigger(event, flags, keycode)
                 return None
