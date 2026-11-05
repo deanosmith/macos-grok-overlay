@@ -136,6 +136,16 @@ class AppDelegate(NSObject):
         close_button.setTarget_(self)
         close_button.setAction_("hideWindow:")
         self.drag_area.addSubview_(close_button)
+        open_in_grok_button = NSButton.alloc().initWithFrame_(NSMakeRect(content_bounds.size.width - 25, 5, 20, 20))
+        open_in_grok_button.setAutoresizingMask_(NSViewMinXMargin)
+        open_in_grok_button.setBordered_(False)
+        open_in_grok_button.setImage_(
+            NSImage.imageWithSystemSymbolName_accessibilityDescription_("arrow.up.right.square", "Open in Grok")
+        )
+        open_in_grok_button.setToolTip_("Open in Grok")
+        open_in_grok_button.setTarget_(self)
+        open_in_grok_button.setAction_("openInGrok:")
+        self.drag_area.addSubview_(open_in_grok_button)
         # Update the webview sizinug and insert it below drag area.
         content_view.addSubview_(self.webview)
         self.webview.setFrame_(NSMakeRect(0, 0, content_bounds.size.width, content_bounds.size.height - DRAG_AREA_HEIGHT))
@@ -204,60 +214,63 @@ class AppDelegate(NSObject):
         hide_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Hide "+APP_TITLE, "hideWindow:", "h")
         hide_item.setTarget_(self)
         menu.addItem_(hide_item)
-        home_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Home", "goToWebsite:", "g")
-        home_item.setTarget_(self)
-        menu.addItem_(home_item)
-        clear_data_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Clear Web Cache", "clearWebViewData:", "")
-        clear_data_item.setTarget_(self)
-        menu.addItem_(clear_data_item)
-        sign_in_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Sign In with Browser", "openSignInWindow:", "")
-        sign_in_item.setTarget_(self)
-        menu.addItem_(sign_in_item)
-        sync_login_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Sync Login from Browser", "syncLoginFromBrowser:", "")
-        sync_login_item.setTarget_(self)
-        menu.addItem_(sync_login_item)
-        # Microphone.
-        mic_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Request Microphone Access", "requestMicrophoneAccess:", "")
-        mic_item.setTarget_(self)
-        menu.addItem_(mic_item)
-        # Intall / uninstall autolauncher.
-        install_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Install Autolauncher", "install:", "")
-        install_item.setTarget_(self)
-        menu.addItem_(install_item)
-        uninstall_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Uninstall Autolauncher", "uninstall:", "")
-        uninstall_item.setTarget_(self)
-        menu.addItem_(uninstall_item)
-        # ----------------------------------------
-        menu.addItem_(NSMenuItem.separatorItem())
-        # Trigger.
-        set_trigger_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Set New Trigger", "setTrigger:", "")
-        set_trigger_item.setTarget_(self)
-        menu.addItem_(set_trigger_item)
-        trigger_label = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Current Trigger", "", "")
-        trigger_label.setEnabled_(False)
-        menu.addItem_(trigger_label)
-        self.trigger_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", "", "")
-        self.trigger_item.setEnabled_(False)
-        menu.addItem_(self.trigger_item)
-        menu.addItem_(NSMenuItem.separatorItem())
-        settings_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Settings", "", "")
-        settings_menu = NSMenu.alloc().initWithTitle_("Settings")
         particles_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Window Animations", "toggleParticleAnimations:", ""
+            "Particles", "toggleParticleAnimations:", ""
         )
         particles_item.setTarget_(self)
         particles_item.setState_(
             NSControlStateValueOn if self.settings.boolForKey_("ParticleAnimationsEnabled") else NSControlStateValueOff
         )
-        settings_menu.addItem_(particles_item)
-        settings_item.setSubmenu_(settings_menu)
-        menu.addItem_(settings_item)
+        menu.addItem_(particles_item)
         menu.addItem_(NSMenuItem.separatorItem())
+        settings_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Settings", "", "")
+        settings_menu = NSMenu.alloc().initWithTitle_("Settings")
+        home_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Home", "goToWebsite:", "g")
+        home_item.setTarget_(self)
+        settings_menu.addItem_(home_item)
+        open_in_grok_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Open in Grok", "openInGrok:", "")
+        open_in_grok_item.setTarget_(self)
+        settings_menu.addItem_(open_in_grok_item)
+        clear_data_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Clear Web Cache", "clearWebViewData:", "")
+        clear_data_item.setTarget_(self)
+        settings_menu.addItem_(clear_data_item)
+        sign_in_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Sign In with Browser", "openSignInWindow:", "")
+        sign_in_item.setTarget_(self)
+        settings_menu.addItem_(sign_in_item)
+        sync_login_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Sync Login from Browser", "syncLoginFromBrowser:", "")
+        sync_login_item.setTarget_(self)
+        settings_menu.addItem_(sync_login_item)
+        # Microphone.
+        mic_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Request Microphone Access", "requestMicrophoneAccess:", "")
+        mic_item.setTarget_(self)
+        settings_menu.addItem_(mic_item)
+        # Intall / uninstall autolauncher.
+        install_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Install Autolauncher", "install:", "")
+        install_item.setTarget_(self)
+        settings_menu.addItem_(install_item)
+        uninstall_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Uninstall Autolauncher", "uninstall:", "")
+        uninstall_item.setTarget_(self)
+        settings_menu.addItem_(uninstall_item)
+        # ----------------------------------------
+        settings_menu.addItem_(NSMenuItem.separatorItem())
+        # Trigger.
+        set_trigger_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Set New Trigger", "setTrigger:", "")
+        set_trigger_item.setTarget_(self)
+        settings_menu.addItem_(set_trigger_item)
+        trigger_label = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Current Trigger", "", "")
+        trigger_label.setEnabled_(False)
+        settings_menu.addItem_(trigger_label)
+        self.trigger_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", "", "")
+        self.trigger_item.setEnabled_(False)
+        settings_menu.addItem_(self.trigger_item)
+        settings_menu.addItem_(NSMenuItem.separatorItem())
         # ----------------------------------------
         # Quit.
         quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Quit", "terminate:", "q")
         quit_item.setTarget_(NSApp)
-        menu.addItem_(quit_item)
+        settings_menu.addItem_(quit_item)
+        settings_item.setSubmenu_(settings_menu)
+        menu.addItem_(settings_item)
         # Set the menu for the status item
         self.status_item.setMenu_(menu)
         # Add resize observer
@@ -404,6 +417,12 @@ class AppDelegate(NSObject):
     def goToWebsite_(self, sender):
         self.loadOverlayHomePage_(None)
         self.showWindow_(None)
+
+    def openInGrok_(self, sender):
+        url = self.webview.URL()
+        if url is None or url.host() != "grok.com" or url.scheme() not in ("http", "https"):
+            url = NSURL.URLWithString_(WEBSITE)
+        self.auth_browser.open_in_grok(url)
 
     def loadOverlayHomePage_(self, sender):
         # Load the target website even while hidden so the overlay is ready when shown.

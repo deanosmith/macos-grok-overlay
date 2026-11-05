@@ -3,7 +3,10 @@
 # WKWebView cannot complete passkey / security-key ceremonies for third-party providers.
 # Real browsers support the 1Password extension and full WebAuthn.
 
+import glob
+import json
 import os
+import plistlib
 import subprocess
 import time
 
@@ -32,6 +35,7 @@ from WebKit import (
 from .constants import WEBSITE
 
 BROWSER_BUNDLE_IDS = frozenset({
+    "com.apple.Safari",
     "com.google.Chrome",
     "org.mozilla.firefox",
     "company.thebrowser.Browser",
@@ -158,6 +162,9 @@ def is_external_auth_url(url_string):
     host = _host_from_url(url_string)
     if not host:
         return False
+    if host in ("x.com", "twitter.com"):
+        path = _path_from_url(url_string)
+        return any(marker in path for marker in AUTH_PATH_MARKERS)
     if host in AUTH_HOSTS:
         return True
     if any(host.endswith(suffix) for suffix in AUTH_HOST_SUFFIXES):
@@ -239,6 +246,72 @@ class AuthBrowserManager:
         if restore_overlay:
             self.app_delegate.loadOverlayHomePage_(None)
 
+    def open_link_in_browser(self, url):
+        if url is None:
+            return
+        scheme = str(url.scheme() or "").lower()
+        if scheme in ("http", "https"):
+            self._open_in_preferred_browser(url)
+        elif scheme in ("mailto", "tel"):
+            NSWorkspace.sharedWorkspace().openURL_(url)
+
+    def open_in_grok(self, url):
+        for applications_dir in ("~/Applications", "/Applications"):
+            pattern = os.path.join(os.path.expanduser(applications_dir), "Chrome Apps.localized", "*.app")
+            for app_path in sorted(glob.glob(pattern)):
+                try:
+                    with open(os.path.join(app_path, "Contents", "Info.plist"), "rb") as plist_file:
+                        info = plistlib.load(plist_file)
+                except (OSError, ValueError, plistlib.InvalidFileException):
+                    continue
+                if info.get("CrBundleIdentifier") != "com.google.Chrome":
+                    continue
+                shortcut_url = NSURL.URLWithString_(info.get("CrAppModeShortcutURL", ""))
+                if shortcut_url is None or shortcut_url.host() != "grok.com":
+                    continue
+                app_id = info.get("CrAppModeShortcutID")
+                app_data_dir = info.get("CrAppModeUserDataDir")
+                if not app_id or not app_data_dir:
+                    continue
+                profile_dir = os.path.dirname(os.path.dirname(app_data_dir))
+                user_data_dir = os.path.dirname(profile_dir)
+                profile_name = os.path.basename(profile_dir)
+                if profile_name == "-":
+                    try:
+                        with open(os.path.join(user_data_dir, "Local State"), encoding="utf-8") as state_file:
+                            state = json.load(state_file)
+                    except (OSError, ValueError):
+                        continue
+                    app_state = state.get("app_shims", {}).get(app_id, {})
+                    profiles = app_state.get("last_active_profiles") or app_state.get("installed_profiles")
+                    if not profiles:
+                        continue
+                    profile_name = profiles[0]
+
+                workspace = NSWorkspace.sharedWorkspace()
+                chrome_url = workspace.URLForApplicationWithBundleIdentifier_("com.google.Chrome")
+                if chrome_url is None:
+                    continue
+                config = NSWorkspaceOpenConfiguration.configuration()
+                config.setActivates_(True)
+                config.setCreatesNewApplicationInstance_(True)
+                config.setArguments_([
+                    f"--user-data-dir={user_data_dir}",
+                    f"--profile-directory={profile_name}",
+                    f"--app-id={app_id}",
+                    f"--app-launch-url-for-shortcuts-menu-item={url.absoluteString()}",
+                ])
+                workspace.openApplicationAtURL_configuration_completionHandler_(
+                    chrome_url, config, lambda app, err: None
+                )
+                return
+
+        alert = NSAlert.alloc().init()
+        alert.setAlertStyle_(NSAlertStyleInformational)
+        alert.setMessageText_("Grok Chrome app not found")
+        alert.setInformativeText_("Install grok.com as a Chrome app, then try again.")
+        alert.runModal()
+
     def _running_browser_for_bundle_id(self, bundle_id):
         apps = NSRunningApplication.runningApplicationsWithBundleIdentifier_(bundle_id)
         return apps[0] if apps else None
@@ -290,16 +363,20 @@ class AuthBrowserManager:
                     break
 
         running_browsers = []
-        for bundle_id in BROWSER_BUNDLE_IDS:
+        for bundle_id in sorted(BROWSER_BUNDLE_IDS):
             running = self._running_browser_for_bundle_id(bundle_id)
             if running is not None:
                 running_browsers.append((running, bundle_id))
-        if len(running_browsers) == 1:
+        if running_browsers:
             app, bundle_id = running_browsers[0]
             app_url = app.bundleURL()
             if app_url is not None:
                 self._open_with_application(app_url, url)
                 return str(app.localizedName()), bundle_id
+
+        if default_app_url is not None and default_bundle_id is not None:
+            self._open_with_application(default_app_url, url)
+            return str(workspace.localizedNameForApplicationAtURL_(default_app_url)), default_bundle_id
 
         if workspace.openURL_(url):
             name = "your default browser"
@@ -339,9 +416,19 @@ class WebNavigationDelegate(NSObject):
     @objc.python_method
     def _navigation_policy_for_action(self, webview, navigation_action):
         request = navigation_action.request()
-        url_string = str(request.URL().absoluteString())
+        url = request.URL()
+        if url is None:
+            return WKNavigationActionPolicyAllow
+        url_string = str(url.absoluteString())
 
         if not is_external_auth_url(url_string):
+            target_frame = navigation_action.targetFrame()
+            host = str(url.host() or "").lower()
+            is_grok = host == "grok.com" or host.endswith(".grok.com")
+            if (target_frame is not None and target_frame.isMainFrame()
+                    and self._is_user_initiated(navigation_action) and not is_grok):
+                self.app_delegate.auth_browser.open_link_in_browser(url)
+                return WKNavigationActionPolicyCancel
             return WKNavigationActionPolicyAllow
 
         if self._is_user_initiated(navigation_action):
@@ -423,7 +510,18 @@ class WebUIDelegate(NSObject):
         self, webview, configuration, navigation_action, window_features
     ):
         if not navigation_action.targetFrame():
-            self.app_delegate.auth_browser.handle_user_auth_request(restore_overlay=True)
+            url = navigation_action.request().URL()
+            if url is None:
+                return None
+            url_string = str(url.absoluteString())
+            if is_overlay_login_redirect(url_string):
+                self.app_delegate.auth_browser.handle_user_auth_request(restore_overlay=True)
+            else:
+                host = str(url.host() or "").lower()
+                if host == "grok.com" or host.endswith(".grok.com"):
+                    webview.loadRequest_(navigation_action.request())
+                else:
+                    self.app_delegate.auth_browser.open_link_in_browser(url)
         return None
 
     def webViewDidClose_(self, webview):
